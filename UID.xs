@@ -299,6 +299,13 @@ void
 drop_gid_temp(new_gid)
 		gid_t new_gid;
 	CODE:
+		register struct passwd *pw;
+		register uid_t uid;
+		uid = geteuid();
+		pw = getpwuid(uid);
+                if (pw && (initgroups(pw->pw_name, new_gid) < 0)) {
+			croak("initgroup to temporarily drop privs failed");
+		}
 		if (setresgid(-1,new_gid,getegid()) < 0) {
 			croak("Could not temporarily drop privs.");
 		}
@@ -316,9 +323,16 @@ drop_gid_perm(new_gid)
 	PREINIT:
 		gid_t rgid, egid, sgid;
 	CODE:
+		register struct passwd *pw;
+		register uid_t uid;
+		uid = geteuid();
+		pw = getpwuid(uid);
+                if (pw && (initgroups(pw->pw_name, new_gid) < 0)) {
+			croak("initgroup to drop privs failed");
+		}
 		if (setresgid(new_gid,new_gid,new_gid) < 0) {
 			croak("Could not permanently drop privs.");
-		}
+                }
 		if (getresgid(&rgid, &egid, &sgid) < 0) {
 			croak("Could not check privileges were dropped.");
 		}
