@@ -8,12 +8,8 @@
  *
  */
 
-/* TODO: Everything here uses type 'int' when it should use type
- * 'uid_t'.  On most systems they're the same, but we should not assume.
- *
- * However, XS _wants_ ints to be returned, since it knows how to deal with
- * them.  Can we trust the compiler to do the right thing with type
- * conversion?
+/* Note: uid_t and gid_t are mapped to T_UV via typemap.
+   Since 5.16 $<,$> ... are not cached anymore in PL_uid,...
  */
 
 #include "EXTERN.h"
@@ -27,7 +23,7 @@
 
 #ifndef SYS_getresuid
 	uid_t cached_suid;
-	uid_t cached_sgid;
+	gid_t cached_sgid;
 #endif
 
 MODULE = Proc::UID  PACKAGE = Proc::UID
@@ -37,28 +33,28 @@ PROTOTYPES: DISABLE
 # Low-level calls to get our privileges.
 # These *should* always return the same as $< and $>, $( and $)
 
-int
+uid_t
 geteuid()
 	CODE:
 		RETVAL = geteuid();
 	OUTPUT:
 		RETVAL
 
-int
+uid_t
 getruid()
 	CODE:
 		RETVAL = getuid();
 	OUTPUT:
 		RETVAL
 
-int
+gid_t
 getegid()
 	CODE:
 		RETVAL = getegid();
 	OUTPUT:
 		RETVAL
 
-int
+gid_t
 getrgid()
 	CODE:
 		RETVAL = getgid();
@@ -76,11 +72,11 @@ suid_is_cached()
 	OUTPUT:
 		RETVAL
 
-int
+uid_t
 getsuid()
 	PREINIT:
 		int ret;
-		int ruid, euid, suid;
+		uid_t ruid, euid, suid;
 	CODE:
 		ret = getresuid(&ruid, &euid, &suid);
 		if (ret == -1) {
@@ -93,11 +89,11 @@ getsuid()
 
 # Get our saved GID 
 
-int
+gid_t
 getsgid()
 	PREINIT:
 		int ret;
-		int rgid, egid, sgid;
+		gid_t rgid, egid, sgid;
 	CODE:
 		ret = getresgid(&rgid, &egid, &sgid);
 		if (ret == -1) {
@@ -126,14 +122,14 @@ init()
 		cached_suid = geteuid();
 		cached_sgid = getegid();
 
-int
+uid_t
 getsuid()
 	CODE:
 		RETVAL = cached_suid;
 	OUTPUT:
 		RETVAL
 
-int
+gid_t
 getsgid()
 	CODE:
 		RETVAL = cached_sgid;
@@ -148,7 +144,7 @@ getsgid()
 
 void
 setsuid(suid)
-		int suid;
+		uid_t suid;
 	CODE:
 		if (setresuid(-1,-1,suid) == -1) {
 			croak("Could not set saved UID");
@@ -157,7 +153,7 @@ setsuid(suid)
 # Set our saved GID.
 void
 setsgid(sgid)
-		int sgid;
+		gid_t sgid;
 	CODE:
 		if (setresgid(-1,-1,sgid) == -1) {
 			croak("Could not set saved GID");
@@ -167,13 +163,13 @@ setsgid(sgid)
 
 void
 setsuid(suid)
-		int suid;
+		uid_t suid;
 	CODE:
 		croak("setsuid cannot run without setresuid, which is not on this system.");
 
 void
 setsgid(sgid)
-		int sgid;
+		gid_t sgid;
 	CODE:
 		croak("setsgid cannot run without setresgid, which is not not on this system.");
 
@@ -184,13 +180,13 @@ setsgid(sgid)
 # drop_uid_temp - Drop privileges temporarily.
 # Moves the current effective UID to the saved UID.
 # Assigns the new_uid to the effective UID.
-# Updates PL_euid
+# Updates PL_euid until 5.16.
 
-#ifdef SYS_setresuid
+#if defined(SYS_setresuid)
 
 void
 drop_uid_temp(new_uid)
-		int new_uid;
+		uid_t new_uid;
 	CODE:
 		if (setresuid(-1,new_uid,geteuid()) < 0) {
 			croak("Could not temporarily drop privs.");
@@ -198,15 +194,17 @@ drop_uid_temp(new_uid)
 		if (geteuid() != new_uid) {
 			croak("Dropping privs appears to have failed.");
 		}
-		PL_euid = new_uid;
+#if defined(PL_euid)
+                PL_euid = new_uid;
+#endif
 
 # else /* No setresuid() */
 
 void
 drop_uid_temp(new_uid)
-		int new_uid;
+		uid_t new_uid;
 	CODE:
-		int old_euid = geteuid();
+		uid_t old_euid = geteuid();
 		# This looks like a no-op, but actually sets the
 		# SUID to the EUID.  Or *should*.
 		if (setreuid(getruid(), old_euid) < 0) {
@@ -219,18 +217,20 @@ drop_uid_temp(new_uid)
 			croak("Dropping privs appears to have failed.");
 		}
 		cached_suid = old_euid;
+#if defined(PL_euid)
 		PL_euid = new_uid;
+#endif
 
 #endif /* setresuid */
 
 # drop_uid_perm - Drop privileges permanently.
 # Set all privileges to new_uid.
-# Updates PL_uid and PL_euid
+# Updates PL_uid and PL_euid until 5.16
 void
 drop_uid_perm(new_uid)
-		int new_uid;
+		uid_t new_uid;
 	PREINIT:
-		int ruid, euid, suid;
+		uid_t ruid, euid, suid;
 	CODE:
 #ifdef SYS_setresuid
 		if (setresuid(new_uid,new_uid,new_uid) < 0) {
@@ -257,13 +257,15 @@ drop_uid_perm(new_uid)
 
 		cached_suid = new_uid;
 #endif
+#if defined(PL_uid)
 		PL_uid  = new_uid;
 		PL_euid = new_uid;
+#endif
 
 void
 restore_uid()
 	PREINIT:
-		int ruid, euid, suid;
+		uid_t ruid, euid, suid;
 	CODE:
 #ifdef SYS_setresuid
 		if (getresuid(&ruid, &euid, &suid) < 0) {
@@ -283,7 +285,10 @@ restore_uid()
 			croak("Failed to set effective UID.");
 		}
 #endif
+#if defined(PL_euid)
 		PL_euid = suid;
+#endif
+
 
 # Now let's do the same for gid functions.
 # TODO - Think about getgroups / setgroups, how do they best fit in?
@@ -292,7 +297,7 @@ restore_uid()
 
 void
 drop_gid_temp(new_gid)
-		int new_gid;
+		gid_t new_gid;
 	CODE:
 		if (setresgid(-1,new_gid,getegid()) < 0) {
 			croak("Could not temporarily drop privs.");
@@ -300,14 +305,16 @@ drop_gid_temp(new_gid)
 		if (getegid() != new_gid) {
 			croak("Dropping privs appears to have failed.");
 		}
+#if defined(PL_egid)
 		PL_egid = new_gid;
+#endif
 
 
 void
 drop_gid_perm(new_gid)
-		int new_gid;
+		gid_t new_gid;
 	PREINIT:
-		int rgid, egid, sgid;
+		gid_t rgid, egid, sgid;
 	CODE:
 		if (setresgid(new_gid,new_gid,new_gid) < 0) {
 			croak("Could not permanently drop privs.");
@@ -318,13 +325,15 @@ drop_gid_perm(new_gid)
 		if (rgid != new_gid || egid != new_gid || sgid != new_gid) {
 			croak("Failed to drop privileges.");
 		}
+#if defined(PL_egid)
 		PL_gid  = new_gid;
 		PL_egid = new_gid;
+#endif
 
 void
 restore_gid()
 	PREINIT:
-		int rgid, egid, sgid;
+		gid_t rgid, egid, sgid;
 	CODE:
 		if (getresgid(&rgid, &egid, &sgid) < 0) {
 			croak("Could not verify privileges.");
@@ -335,5 +344,6 @@ restore_gid()
 		if (getegid() != sgid) {
 			croak("Failed to set effective GID.");
 		}
+#if defined(PL_egid)
 		PL_egid = sgid;
-
+#endif
